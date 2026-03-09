@@ -500,6 +500,7 @@ function buildCustomModel(
 export class ModelRegistry {
 	#models: Model<Api>[] = [];
 	#customProviderApiKeys: Map<string, string> = new Map();
+	#runtimeProviderRegistrations: Map<string, { name: string; config: ProviderConfigInput; sourceId?: string }> = new Map();
 	#keylessProviders: Set<string> = new Set();
 	#discoverableProviders: DiscoveryProviderConfig[] = [];
 	#modelOverrides: Map<string, Map<string, ModelOverride>> = new Map();
@@ -531,6 +532,7 @@ export class ModelRegistry {
 	 * Reload models from disk (built-in + custom from models.json).
 	 */
 	async refresh(strategy: ModelRefreshStrategy = "online-if-uncached"): Promise<void> {
+		const runtimeRegistrations = Array.from(this.#runtimeProviderRegistrations.values());
 		this.#modelsConfigFile.invalidate();
 		this.#customProviderApiKeys.clear();
 		this.#keylessProviders.clear();
@@ -539,6 +541,9 @@ export class ModelRegistry {
 		this.#configError = undefined;
 		this.#loadModels();
 		await this.#refreshRuntimeDiscoveries(strategy);
+		for (const { name, config, sourceId } of runtimeRegistrations) {
+			this.registerProvider(name, config, sourceId);
+		}
 	}
 
 	/**
@@ -1173,6 +1178,11 @@ export class ModelRegistry {
 	clearSourceRegistrations(sourceId: string): void {
 		unregisterCustomApis(sourceId);
 		unregisterOAuthProviders(sourceId);
+		for (const [key, registration] of this.#runtimeProviderRegistrations.entries()) {
+			if (registration.sourceId === sourceId) {
+				this.#runtimeProviderRegistrations.delete(key);
+			}
+		}
 	}
 
 	/**
@@ -1198,6 +1208,13 @@ export class ModelRegistry {
 	 * If provider has oauth: registers OAuth provider for /login support.
 	 */
 	registerProvider(providerName: string, config: ProviderConfigInput, sourceId?: string): void {
+		const registrationKey = `${sourceId ?? "runtime"}:${providerName}`;
+		this.#runtimeProviderRegistrations.set(registrationKey, {
+			name: providerName,
+			config,
+			sourceId,
+		});
+
 		if (config.streamSimple && !config.api) {
 			throw new Error(`Provider ${providerName}: "api" is required when registering streamSimple.`);
 		}
